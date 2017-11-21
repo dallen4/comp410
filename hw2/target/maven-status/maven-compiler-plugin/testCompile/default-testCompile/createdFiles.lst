@@ -1,0 +1,7 @@
+osdi/primesolver/NumberTest.class
+osdi/locks/MonitorTest.class
+osdi/primesolver/NumberRangeTest.class
+osdi/locks/SpinLockTest.class
+osdi/locks/SemaphoreTest.class
+osdi/locks/SemaphoreAsAMutexTest.class
+osdi/locks/MutexTest.class
