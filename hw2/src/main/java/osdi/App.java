@@ -17,13 +17,13 @@ public class App
     /*
      * you may change this method. you must use NumberRange, PrimeNumberCounter, and reportNumberOfPrimes in here
      */
-    public static void main( String[] args )
-    {
-//    		System.out.println("Hello world");
+    public static void main( String[] args ) {
+    	
         NumberRange range = new NumberRange(startValue, endValue);
         long numberOfPrimesInRange = new PrimeNumberCounter().countPrimeNumbers(range);
 
         reportNumberOfPrimes(numberOfPrimesInRange);
+        
     }
 
     /*

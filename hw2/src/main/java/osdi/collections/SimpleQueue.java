@@ -1,7 +1,5 @@
 package osdi.collections;
 
-import osdi.locks.Semaphore;
-
 /*
  * change this if you feel it is necessary
  */
@@ -11,7 +9,4 @@ import osdi.locks.Semaphore;
 public interface SimpleQueue<T> {
     void enqueue(T item);
     T dequeue();
-    Boolean empty();
-    int size();
-    Semaphore getEmptyFlag();
 }

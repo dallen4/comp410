@@ -7,6 +7,11 @@ package osdi.locks;
  * Grad students only - you may not use anything in java.util.concurrent.* you may only use locks from osdi.locks.*
  */
 public class Monitor {
+	
+	// private variables
+	// ref: https://github.com/LoyolaChicagoBooks/operatingsystems-examples/blob/master/monitor/monitor.cc
+	private SpinLock lock = new SpinLock();
+	private int pulse = 0;
 
     public interface CodeToExecute {
         void run(MonitorOperations ops);
@@ -20,23 +25,33 @@ public class Monitor {
     private final MonitorOperations lockObj = new MonitorOperationsImpl();
 
     public void sync(CodeToExecute fn) {
-        synchronized (lockObj) {
-            fn.run(lockObj);
-        }
+    		lock.lock();
+        fn.run(lockObj);
     }
 
-    private static class MonitorOperationsImpl implements MonitorOperations {
+    private class MonitorOperationsImpl implements MonitorOperations {
+    		
         @Override
         public void Wait() {
-            try {
-                this.wait();
-            } catch (InterruptedException e) {
-            }
+        	
+        		lock.unlock();
+        		lock.lock();
+        		
+        		pulse = --pulse;
+        	
+//            try {
+//                this.wait();
+//            } catch (InterruptedException e) {
+//            }
         }
 
         @Override
         public void Pulse() {
-            this.notifyAll();
+        	
+        		lock.unlock();
+        		pulse = ++pulse;
+        	
+//            this.notifyAll();
         }
     }
 }

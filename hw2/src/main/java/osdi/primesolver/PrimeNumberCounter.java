@@ -2,10 +2,10 @@ package osdi.primesolver;
 
 import osdi.collections.BoundBuffer;
 import osdi.collections.SimpleQueue;
-import osdi.locks.Mutex;
 import osdi.locks.Semaphore;
 
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.Collection;
 
 /*
@@ -25,15 +25,15 @@ public class PrimeNumberCounter {
     /*
      * you may not modify the method, but you can modify the signature of the method if needed
      */
-    private void startThreads(SimpleQueue<Long> valuesToCheck, SimpleQueue<Long> valuesThatArePrime, Semaphore operationsCompleted) {
+    private void startThreads(SimpleQueue<ArrayList<Long>> valuesToCheck, SimpleQueue<ArrayList<Long>> valuesThatArePrime, Semaphore operationsCompleted, Semaphore valuesCounted) {
         Collection<Thread> threads = new ArrayList<>();
         int threadCount = getThreadCount();
         for(int i = 0; i < threadCount; i++) {
-            Thread t = new Thread(()->findPrimeValues(valuesToCheck, valuesThatArePrime, operationsCompleted));
+            Thread t = new Thread(()->findPrimeValues(valuesToCheck, valuesThatArePrime, operationsCompleted, valuesCounted));
             t.setDaemon(true);
             threads.add(t);
         }
-        Thread counter = new Thread(()->countPrimeValues(valuesThatArePrime));
+        Thread counter = new Thread(()->countPrimeValues(valuesThatArePrime, valuesCounted));
         threads.add(counter);
 
         for(Thread t : threads) {
@@ -46,26 +46,41 @@ public class PrimeNumberCounter {
      * you may modify this method
      */
     public long countPrimeNumbers(NumberRange range) {
-        SimpleQueue<Long> valuesToCheck = BoundBuffer.createBoundBufferWithSemaphores(100);
-        SimpleQueue<Long> valuesThatArePrime = BoundBuffer.createBoundBufferWithSemaphores(50);
+        SimpleQueue<ArrayList<Long>> valuesToCheck = BoundBuffer.createBoundBufferWithSemaphores(7000);
+        SimpleQueue<ArrayList<Long>> valuesThatArePrime = BoundBuffer.createBoundBufferWithSemaphores(425);
         
-        int operationsToComplete = (int)((range.getMaxValue() - range.getMinValue() - 2) *-1);
+        // calculates number of values to be tested
+        int operationsToComplete = (int)((range.getMaxValue() - range.getMinValue()) *-1);
+        // declares grain of work (i.e., size of arrays stored in each queue index)
+        int grainSize = 4275;
+        
+        // ensures all values have completed isPrime() calculation
         Semaphore operationsCompleted = new Semaphore(operationsToComplete);
+        // ensures all values have been accounted for (both prime and not prime)
+        Semaphore valuesCounted = new Semaphore(operationsToComplete);
         
-        startThreads(valuesToCheck, valuesThatArePrime, operationsCompleted);
+        startThreads(valuesToCheck, valuesThatArePrime, operationsCompleted, valuesCounted);
+        
+        ArrayList<Long> temp = new ArrayList<Long>(grainSize);
 
         for(Long value : range) {
-            valuesToCheck.enqueue(value);
+        		if(temp.size() == grainSize) {
+        			valuesToCheck.enqueue(temp);
+        			temp = new ArrayList<Long>(grainSize);
+        			temp.add(value);
+        			continue;
+        		}
+        		temp.add(value);	
         }
-        // Conditions to meet before returning value:
-//        valuesToCheck.empty() && valuesThatArePrime.empty() && operationsCompleted >= 1
+        
+        if (!temp.isEmpty()) valuesToCheck.enqueue(temp);
+        		
+        // Conditions to meet before returning value: valuesToCheck.empty() && valuesThatArePrime.empty() && operationsCompleted >= 1
         while(true) {
         		// try to do a down (must be >= 1)
-//        		System.out.println(operationsCompleted.getCurrentValue());
         		operationsCompleted.down();
-        		// if down can be completed, test queues
-//        		valuesToCheck.getEmptyFlag().down();
-        		valuesThatArePrime.getEmptyFlag().down();
+        		// if down can be completed, test if all numbers have been accounted for
+        		valuesCounted.down();
         		
         		return currentCount;
         }
@@ -74,41 +89,58 @@ public class PrimeNumberCounter {
     /*
      * you may modify this method
      */
-    private void findPrimeValues(SimpleQueue<Long> valuesToCheck, SimpleQueue<Long> valuesThatArePrime, Semaphore operationsCompleted) {
+    private void findPrimeValues(SimpleQueue<ArrayList<Long>> valuesToCheck, SimpleQueue<ArrayList<Long>> valuesThatArePrime, Semaphore operationsCompleted, Semaphore valuesCounted) {
     		    		
         while(true) {
         		// secured by ReaderWriterLock in BoundBufferImpl
-            Long current = valuesToCheck.dequeue();
+            ArrayList<Long> current = valuesToCheck.dequeue();
+            Iterator<Long> i = current.iterator();
             
-            if(Number.IsPrime(current)) {
-            		// secured by ReaderWriterLock in BoundBufferImpl
-                valuesThatArePrime.enqueue(current);
+            ArrayList<Long> temp = new ArrayList<Long>();
+            
+            // proceed while array has more values
+            while (i.hasNext()) {
+            		// grab current value
+            		Long currValue = i.next();
+	            if(Number.IsPrime(currValue)) {
+		        		// add value to temp array
+		            	temp.add(currValue);
+	            } else {
+	            		// up on valuesCounted because value won't be counted by countPrimeValues() (moves closer to 1)
+	            		valuesCounted.up();
+	            }
+	            // up on operationsCompleted (moving closer to 1)
+	            operationsCompleted.up();
             }
-            // up on operationsCompleted (moving closer to 1)
-            operationsCompleted.up();
+            // secured by ReaderWriterLock in BoundBufferImpl
+			valuesThatArePrime.enqueue(temp);
         }
     }
 
     /*
      * you may modify this method
      */
-    private void countPrimeValues(SimpleQueue<Long> valuesThatArePrime) {
-    	    	
-    		Mutex m = new Mutex();
-    		
+    private void countPrimeValues(SimpleQueue<ArrayList<Long>> valuesThatArePrime, Semaphore valuesCounted) {
+    	    	    		
         while(true) {
 			// critical section
-        		m.lock();
         		// secured by ReaderWriterLock in BoundBufferImpl
-			valuesThatArePrime.dequeue();
-			currentCount += 1;
-			m.unlock();
-			// end critical
-            
-            if(currentCount % 10000 == 0) {
-                System.out.println("have " + currentCount + " prime values");
-                System.out.flush();
-            }
+			ArrayList<Long> temp = valuesThatArePrime.dequeue();
+			Iterator<Long> i = temp.iterator();
+			
+			while (i.hasNext()) {
+				// pull current value
+				i.next();
+				currentCount += 1;
+				// up on valuesCounted
+				valuesCounted.up();
+				// end critical
+	            
+	            	if(currentCount % 10000 == 0) {
+	            		System.out.println("have " + currentCount + " prime values");
+	            		System.out.flush();
+	            	}
+			}
         }
     }
 }
